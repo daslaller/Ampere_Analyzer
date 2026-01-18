@@ -102,6 +102,11 @@ export interface LiveDataPoint {
     limitValue: number;
 }
 
+export interface InterpolatedDataPoint extends LiveDataPoint {
+    isInterpolated: boolean;
+    timestamp: number;
+}
+
 export interface AiDeepDiveStep {
   title: string;
   description: string;

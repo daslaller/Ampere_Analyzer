@@ -94,24 +94,39 @@ self.onmessage = function(e) {
       };
     };
   
-    // ITERATIVE ALGORITHM - Runs uninterrupted in worker
+    // ITERATIVE ALGORITHM - Runs uninterrupted in worker with batched messages
     if (simulationAlgorithm === 'iterative') {
       let maxSafeCurrent = 0;
       const maxCurrentRange = maxCurrent * 1.2;
-      
+      const BATCH_SIZE = 10; // Send 10 points per message to reduce postMessage overhead
+      let batch = [];
+
       for (let i = 0; i <= precisionSteps; i++) {
         const current = i * (maxCurrentRange / precisionSteps);
         const dataPoint = addDataPoint(current);
-        
-        // Send data point immediately to main thread
-        self.postMessage({
-          type: 'dataPoint',
-          data: dataPoint
-        });
-        
+
+        batch.push(dataPoint);
+
+        // Send batch when full or at specific intervals
+        if (batch.length >= BATCH_SIZE) {
+          self.postMessage({
+            type: 'dataBatch',
+            data: [...batch]
+          });
+          batch = [];
+        }
+
         if (dataPoint.checkResult.isSafe) {
           maxSafeCurrent = current;
         } else {
+          // Send any remaining points in batch
+          if (batch.length > 0) {
+            self.postMessage({
+              type: 'dataBatch',
+              data: [...batch]
+            });
+          }
+
           // Simulation ended
           const finalResult = {
             status: 'success',
@@ -121,7 +136,7 @@ self.onmessage = function(e) {
             finalTemperature: dataPoint.checkResult.finalTemperature,
             powerDissipation: dataPoint.checkResult.powerDissipation,
           };
-          
+
           self.postMessage({
             type: 'complete',
             result: finalResult
@@ -129,7 +144,15 @@ self.onmessage = function(e) {
           return;
         }
       }
-      
+
+      // Send any remaining points in batch
+      if (batch.length > 0) {
+        self.postMessage({
+          type: 'dataBatch',
+          data: [...batch]
+        });
+      }
+
       // Completed without failure
       const finalCheck = checkCurrent(maxSafeCurrent);
       const result = {
@@ -140,7 +163,7 @@ self.onmessage = function(e) {
         finalTemperature: finalCheck.finalTemperature,
         powerDissipation: finalCheck.powerDissipation,
       };
-      
+
       self.postMessage({
         type: 'complete',
         result: result
