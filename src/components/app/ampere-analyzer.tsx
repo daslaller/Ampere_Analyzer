@@ -365,7 +365,8 @@ const onSubmit = (values: FormValues) => {
     setAiCalculatedResults(null);
     setAiOptimizationSuggestions(null);
     setDisplayData([]);
-    pendingDataRef.current = [];
+    const pendingDataQueue: LiveDataPoint[] = [];
+    pendingDataRef.current = pendingDataQueue;
     scrollToResults();
 
     const componentName = values.predefinedComponent
@@ -379,7 +380,7 @@ const onSubmit = (values: FormValues) => {
 
     // Simple callback: push to pending buffer, throttled updates handle the rest
     const updateCallback = (newDataPoint: LiveDataPoint) => {
-      pendingDataRef.current.push(newDataPoint);
+      pendingDataQueue.push(newDataPoint);
     };
 
     // Start throttled chart updates (~15fps)
