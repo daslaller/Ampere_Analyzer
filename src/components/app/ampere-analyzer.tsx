@@ -92,6 +92,7 @@ export default function AmpereAnalyzer() {
   // Simplified: single display data array with throttled updates
   const [displayData, setDisplayData] = useState<LiveDataPoint[]>([]);
   const pendingDataRef = useRef<LiveDataPoint[]>([]);
+  const chartAlgorithmRef = useRef<'iterative' | 'binary'>('iterative');
   const chartUpdateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const deepDiveAnimationRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -117,6 +118,7 @@ export default function AmpereAnalyzer() {
     if (chartUpdateIntervalRef.current) {
       clearInterval(chartUpdateIntervalRef.current);
     }
+    chartAlgorithmRef.current = algorithm;
 
     const MAX_CHART_POINTS = 150;
     const UPDATE_INTERVAL_MS = 66; // ~15fps for chart rendering
@@ -148,7 +150,13 @@ export default function AmpereAnalyzer() {
     // Flush any remaining data
     if (pendingDataRef.current.length > 0) {
       const remaining = pendingDataRef.current.splice(0);
-      setDisplayData((prev: LiveDataPoint[]) => [...prev, ...remaining].slice(-150));
+      setDisplayData((prev: LiveDataPoint[]) => {
+        let updated = [...prev, ...remaining];
+        if (chartAlgorithmRef.current === 'binary') {
+          updated = updated.sort((a, b) => a.current - b.current);
+        }
+        return updated.slice(-150);
+      });
     }
   }, []);
 
