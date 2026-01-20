@@ -82,7 +82,6 @@ export default function AmpereAnalyzer() {
   const [aiCalculatedResults, setAiCalculatedResults] = useState<AiCalculatedExpectedResultsOutput | null>(null);
   const [aiOptimizationSuggestions, setAiOptimizationSuggestions] = useState<AiOptimizationSuggestionsOutput | null>(null);
   const [datasheetFile, setDatasheetFile] = useState<File | null>(null);
-  const [liveData, setLiveData] = useState<LiveDataPoint[]>([]);
   const [isDeepDiveRunning, setIsDeepDiveRunning] = useState(false);
   const [deepDiveSteps, setDeepDiveSteps] = useState<AiDeepDiveStep[]>([]);
   const [currentDeepDiveStep, setCurrentDeepDiveStep] = useState(0);
@@ -365,7 +364,6 @@ const onSubmit = (values: FormValues) => {
     setSimulationResult(null);
     setAiCalculatedResults(null);
     setAiOptimizationSuggestions(null);
-    setLiveData([]);
     setDisplayData([]);
     pendingDataRef.current = [];
     scrollToResults();
@@ -430,7 +428,7 @@ const onSubmit = (values: FormValues) => {
         setIsDeepDiveRunning(true);
         setCurrentDeepDiveStep(0);
         setDeepDiveSteps([]);
-        setLiveData([]);
+        setDisplayData([]);
         scrollToResults();
         if (deepDiveAnimationRef.current) clearInterval(deepDiveAnimationRef.current);
 
@@ -509,7 +507,7 @@ const onSubmit = (values: FormValues) => {
                     clearInterval(deepDiveAnimationRef.current);
                     deepDiveAnimationRef.current = null;
                 }
-                setLiveData([]);
+                setDisplayData([]);
 
                 const MAX_POINTS = 150;
                 const UPDATE_INTERVAL = 50; // ~20fps for deep dive animation
@@ -519,7 +517,7 @@ const onSubmit = (values: FormValues) => {
                         // Take up to 3 points per update
                         const pointsToTake = Math.min(3, dataQueue.length);
                         const newPoints = dataQueue.splice(0, pointsToTake);
-                        setLiveData((prev: LiveDataPoint[]) => [...prev, ...newPoints].slice(-MAX_POINTS));
+                        setDisplayData((prev: LiveDataPoint[]) => [...prev, ...newPoints].slice(-MAX_POINTS));
                     } else {
                         clearInterval(deepDiveAnimationRef.current!);
                         deepDiveAnimationRef.current = null;
