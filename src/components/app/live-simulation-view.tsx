@@ -1,146 +1,154 @@
 
 "use client";
 
-import React from 'react';
+import React, { useRef, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
+import CanvasChart from './canvas-chart';
+import type { CanvasChartHandle } from './canvas-chart';
 import type { LiveDataPoint } from '@/lib/types';
 import { Info } from 'lucide-react';
 
+export interface LiveSimulationViewHandle {
+  /** Push data points directly to canvas — zero React re-renders */
+  pushData: (points: LiveDataPoint[]) => void;
+  /** Clear all data and reset the view */
+  clear: () => void;
+}
+
 interface LiveSimulationViewProps {
-  liveData: LiveDataPoint[];
   simulationMode: 'ftf' | 'temp' | 'budget';
   maxTemperature: number;
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (active && payload && payload.length) {
-    return (
-      <div className="p-2 bg-background/80 border border-border rounded-lg shadow-lg">
-        <p className="label text-sm font-bold">{`Current: ${payload[0].payload.current.toFixed(2)} A`}</p>
-        <p className="intro text-xs text-primary">{`Temperature: ${payload[0].value.toFixed(2)} °C`}</p>
-        <p className="intro text-xs text-red-400">{`Power Loss: ${payload[0].payload.powerLoss.toFixed(2)} W`}</p>
-      </div>
-    );
-  }
-  return null;
-};
+const LiveSimulationView = forwardRef<LiveSimulationViewHandle, LiveSimulationViewProps>(
+  ({ simulationMode, maxTemperature }, ref) => {
+    const chartRef = useRef<CanvasChartHandle>(null);
+    const progressBarRef = useRef<HTMLDivElement>(null);
+    const progressTextRef = useRef<HTMLSpanElement>(null);
+    const statRefs = useRef<{
+      current: HTMLSpanElement | null;
+      temp: HTMLSpanElement | null;
+      power: HTMLSpanElement | null;
+      conduction: HTMLSpanElement | null;
+      switching: HTMLSpanElement | null;
+    }>({ current: null, temp: null, power: null, conduction: null, switching: null });
 
-export default function LiveSimulationView({ liveData, simulationMode, maxTemperature }: LiveSimulationViewProps) {
-    const lastPoint = liveData.length > 0 ? liveData[liveData.length - 1] : {
-        current: 0,
-        temperature: 0,
-        powerLoss: 0,
-        conductionLoss: 0,
-        switchingLoss: 0,
-        progress: 0,
-    };
-    const progress = lastPoint ? lastPoint.progress : 0;
-    
+    // Update DOM directly — bypasses React entirely for 60fps stats
+    const updateStats = useCallback((point: LiveDataPoint) => {
+      const s = statRefs.current;
+      if (s.current) s.current.textContent = `${point.current.toFixed(2)} A`;
+      if (s.temp) s.temp.textContent = `${point.temperature.toFixed(1)} °C`;
+      if (s.power) s.power.textContent = `${point.powerLoss.toFixed(2)} W`;
+      if (s.conduction) s.conduction.textContent = `${point.conductionLoss.toFixed(2)} W`;
+      if (s.switching) s.switching.textContent = `${point.switchingLoss.toFixed(2)} W`;
+
+      // Update progress bar via DOM
+      const progress = Math.min(100, point.progress);
+      if (progressBarRef.current) {
+        progressBarRef.current.style.width = `${progress}%`;
+      }
+      if (progressTextRef.current) {
+        progressTextRef.current.textContent = `${progress.toFixed(1)}%`;
+      }
+    }, []);
+
+    // Expose imperative handle to parent
+    useImperativeHandle(ref, () => ({
+      pushData: (points: LiveDataPoint[]) => {
+        chartRef.current?.pushData(points);
+        if (points.length > 0) {
+          updateStats(points[points.length - 1]);
+        }
+      },
+      clear: () => {
+        chartRef.current?.clear();
+        // Reset stats
+        const s = statRefs.current;
+        if (s.current) s.current.textContent = '0.00 A';
+        if (s.temp) s.temp.textContent = '0.0 °C';
+        if (s.power) s.power.textContent = '0.00 W';
+        if (s.conduction) s.conduction.textContent = '0.00 W';
+        if (s.switching) s.switching.textContent = '0.00 W';
+        if (progressBarRef.current) progressBarRef.current.style.width = '0%';
+        if (progressTextRef.current) progressTextRef.current.textContent = '0.0%';
+      },
+    }));
+
     const progressLabelMap = {
-        ftf: "Progress to First Limit",
-        temp: "Progress to Temp Limit",
-        budget: "Progress to Budget Limit"
+      ftf: "Progress to First Limit",
+      temp: "Progress to Temp Limit",
+      budget: "Progress to Budget Limit"
     };
 
     const progressDescriptionMap = {
-        ftf: "Test will stop when any parameter (temp, power, budget, etc.) exceeds its limit.",
-        temp: `Test will stop when junction temperature exceeds ${maxTemperature}°C.`,
-        budget: `Test will stop when total power loss exceeds the defined cooling budget.`
+      ftf: "Test will stop when any parameter (temp, power, budget, etc.) exceeds its limit.",
+      temp: `Test will stop when junction temperature exceeds ${maxTemperature}°C.`,
+      budget: `Test will stop when total power loss exceeds the defined cooling budget.`
     };
 
-    const barChartData = [
-        { name: 'Current (A)', value: lastPoint.current, fill: 'var(--color-current)' },
-        { name: 'Junction Temp (°C)', value: lastPoint.temperature, fill: 'var(--color-temp)' },
-        { name: 'Total Heat (W)', value: lastPoint.powerLoss, fill: 'var(--color-heat)' },
-        { name: 'Conduction (W)', value: lastPoint.conductionLoss, fill: 'var(--color-conduction)' },
-        { name: 'Switching (W)', value: lastPoint.switchingLoss, fill: 'var(--color-switching)' },
-    ];
-    
     return (
-        <Card className="h-full bg-card/80 backdrop-blur-sm">
-            <style jsx global>{`
-                :root {
-                    --color-current: hsl(var(--chart-1));
-                    --color-temp: hsl(var(--chart-2));
-                    --color-heat: hsl(var(--chart-3));
-                    --color-conduction: hsl(var(--chart-4));
-                    --color-switching: hsl(var(--chart-5));
-                }
-            `}</style>
-            <CardHeader>
-                <CardTitle>Live Analysis</CardTitle>
-                <CardDescription>Visualizing simulation progress in real-time...</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-                <div className="w-full h-48">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart
-                            data={liveData}
-                            margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                        >
-                            <defs>
-                                <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
-                                    <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
-                                </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
-                            <XAxis 
-                                dataKey="current" 
-                                type="number"
-                                domain={['dataMin', 'dataMax']}
-                                unit="A"
-                                stroke="hsl(var(--muted-foreground))"
-                                fontSize={12}
-                                tickFormatter={(val) => val.toFixed(1)}
-                            />
-                            <YAxis 
-                                yAxisId="left" 
-                                dataKey="temperature" 
-                                unit="°C" 
-                                stroke="hsl(var(--muted-foreground))"
-                                fontSize={12}
-                            />
-                            <Tooltip content={<CustomTooltip />}/>
-                            <Area 
-                                yAxisId="left" 
-                                type="monotone" 
-                                dataKey="temperature" 
-                                stroke="hsl(var(--primary))"
-                                fillOpacity={1} 
-                                fill="url(#colorTemp)" 
-                                isAnimationActive={false}
-                            />
-                        </AreaChart>
-                    </ResponsiveContainer>
-                </div>
-                
-                 <div className="w-full h-48">
-                    <ResponsiveContainer width="100%" height="100%">
-                         <BarChart data={barChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
-                            <XAxis dataKey="name" type="category" stroke="hsl(var(--muted-foreground))" fontSize={10} interval={0} angle={-30} textAnchor='end' height={60} />
-                            <YAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                            <Tooltip cursor={{fill: 'hsl(var(--muted) / 0.5)'}} contentStyle={{backgroundColor: 'hsl(var(--background))', border: '1px solid hsl(var(--border))' }}/>
-                            <Bar dataKey="value" isAnimationActive={false} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-                
-                <div>
-                   <div className="flex justify-between items-center mb-2">
-                        <span className="text-sm font-medium">{progressLabelMap[simulationMode]}</span>
-                        <span className="text-sm font-bold text-primary">{progress.toFixed(1)}%</span>
-                   </div>
-                   <Progress value={progress} className="w-full h-3" />
-                   <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1.5">
-                        <Info className="h-3 w-3" />
-                        {progressDescriptionMap[simulationMode]}
-                   </p>
-                </div>
-            </CardContent>
-        </Card>
+      <Card className="h-full bg-card/80 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle>Live Analysis</CardTitle>
+          <CardDescription>Visualizing simulation progress in real-time...</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Canvas chart — renders at 60fps */}
+          <CanvasChart
+            ref={chartRef}
+            height={200}
+            maxTemperature={maxTemperature}
+            showPowerLoss={true}
+          />
+
+          {/* Live stats grid — updated via DOM manipulation, not React state */}
+          <div className="grid grid-cols-5 gap-2 text-center">
+            <div className="bg-background/50 rounded-lg p-2">
+              <div className="text-xs text-muted-foreground">Current</div>
+              <span ref={el => { statRefs.current.current = el; }} className="text-sm font-bold text-blue-400">0.00 A</span>
+            </div>
+            <div className="bg-background/50 rounded-lg p-2">
+              <div className="text-xs text-muted-foreground">Junction Temp</div>
+              <span ref={el => { statRefs.current.temp = el; }} className="text-sm font-bold text-orange-400">0.0 °C</span>
+            </div>
+            <div className="bg-background/50 rounded-lg p-2">
+              <div className="text-xs text-muted-foreground">Total Heat</div>
+              <span ref={el => { statRefs.current.power = el; }} className="text-sm font-bold text-red-400">0.00 W</span>
+            </div>
+            <div className="bg-background/50 rounded-lg p-2">
+              <div className="text-xs text-muted-foreground">Conduction</div>
+              <span ref={el => { statRefs.current.conduction = el; }} className="text-sm font-bold text-purple-400">0.00 W</span>
+            </div>
+            <div className="bg-background/50 rounded-lg p-2">
+              <div className="text-xs text-muted-foreground">Switching</div>
+              <span ref={el => { statRefs.current.switching = el; }} className="text-sm font-bold text-green-400">0.00 W</span>
+            </div>
+          </div>
+
+          {/* Progress bar — updated via DOM, not state */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-medium">{progressLabelMap[simulationMode]}</span>
+              <span ref={progressTextRef} className="text-sm font-bold text-primary">0.0%</span>
+            </div>
+            <div className="relative w-full h-3 bg-secondary rounded-full overflow-hidden">
+              <div
+                ref={progressBarRef}
+                className="absolute inset-y-0 left-0 bg-primary rounded-full transition-none"
+                style={{ width: '0%' }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1.5">
+              <Info className="h-3 w-3" />
+              {progressDescriptionMap[simulationMode]}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     );
-}
+  }
+);
+
+LiveSimulationView.displayName = 'LiveSimulationView';
+
+export default LiveSimulationView;

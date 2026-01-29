@@ -17,6 +17,8 @@ import { FileText, Search, Bot } from 'lucide-react';
 import { Button } from '../ui/button';
 import { isTauri, runTauriSimulation, convertToLiveDataPoints } from '@/lib/tauri';
 import type { TauriSimulationParams } from '@/lib/tauri';
+import LiveSimulationView from './live-simulation-view';
+import type { LiveSimulationViewHandle } from './live-simulation-view';
 
 const isMosfetType = (type: string) => {
     return type.includes('MOSFET') || type.includes('GaN');
@@ -91,13 +93,15 @@ export default function AmpereAnalyzer() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [dialogState, setDialogState] = useState<DialogState>({ type: 'idle' });
 
-  // Simplified: single display data array with throttled updates
+  // 60fps Canvas-based live view: data flows via refs, not React state
   const [displayData, setDisplayData] = useState<LiveDataPoint[]>([]);
+  const liveViewRef = useRef<LiveSimulationViewHandle>(null);
   const pendingDataRef = useRef<LiveDataPoint[]>([]);
-  const chartUpdateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rafRef = useRef<number | null>(null);
   const deepDiveAnimationRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
-  
+  const [isLiveViewVisible, setIsLiveViewVisible] = useState(false);
+
   useEffect(() => {
     try {
       const savedHistory = localStorage.getItem('simulationHistory');
@@ -107,50 +111,39 @@ export default function AmpereAnalyzer() {
     } catch (error) {
         console.error("Could not load history from localStorage", error);
     }
-    // Cleanup on unmount
     return () => {
-      if (chartUpdateIntervalRef.current) clearInterval(chartUpdateIntervalRef.current);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (deepDiveAnimationRef.current) clearInterval(deepDiveAnimationRef.current);
     }
   }, []);
 
-  // Throttled chart update function - updates at ~15fps to prevent Recharts overload
-  const startThrottledChartUpdates = useCallback((algorithm: 'iterative' | 'binary') => {
-    if (chartUpdateIntervalRef.current) {
-      clearInterval(chartUpdateIntervalRef.current);
-    }
+  // 60fps render loop: drains pendingDataRef into the canvas via refs
+  const startRenderLoop = useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
-    const MAX_CHART_POINTS = 150;
-    const UPDATE_INTERVAL_MS = 66; // ~15fps for chart rendering
-
-    chartUpdateIntervalRef.current = setInterval(() => {
+    const loop = () => {
       if (pendingDataRef.current.length > 0) {
-        // For binary search, take one point at a time; for iterative, batch process
-        const pointsToTake = algorithm === 'binary' ? 1 : Math.min(5, pendingDataRef.current.length);
-        const newPoints = pendingDataRef.current.splice(0, pointsToTake);
-
-        setDisplayData((prev: LiveDataPoint[]) => {
-          let updated = [...prev, ...newPoints];
-          // Sort for binary search visualization
-          if (algorithm === 'binary') {
-            updated = updated.sort((a, b) => a.current - b.current);
-          }
-          // Limit points to prevent Recharts slowdown
-          return updated.slice(-MAX_CHART_POINTS);
-        });
+        // Drain up to 10 points per frame
+        const points = pendingDataRef.current.splice(0, Math.min(10, pendingDataRef.current.length));
+        liveViewRef.current?.pushData(points);
+        // Also accumulate for post-completion static display
+        setDisplayData((prev: LiveDataPoint[]) => [...prev, ...points].slice(-300));
       }
-    }, UPDATE_INTERVAL_MS);
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
   }, []);
 
-  const stopThrottledChartUpdates = useCallback(() => {
-    if (chartUpdateIntervalRef.current) {
-      clearInterval(chartUpdateIntervalRef.current);
-      chartUpdateIntervalRef.current = null;
+  const stopRenderLoop = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     }
-    // Flush any remaining data
+    // Flush remaining
     if (pendingDataRef.current.length > 0) {
       const remaining = pendingDataRef.current.splice(0);
-      setDisplayData((prev: LiveDataPoint[]) => [...prev, ...remaining].slice(-150));
+      liveViewRef.current?.pushData(remaining);
+      setDisplayData((prev: LiveDataPoint[]) => [...prev, ...remaining].slice(-300));
     }
   }, []);
 
@@ -407,11 +400,10 @@ export default function AmpereAnalyzer() {
   
 
 
-// Simplified onSubmit with proper throttling
+// onSubmit: uses 60fps requestAnimationFrame loop + Canvas refs
 const onSubmit = (values: FormValues) => {
   startTransition(async () => {
-    // Cleanup existing intervals
-    stopThrottledChartUpdates();
+    stopRenderLoop();
 
     // Reset state
     setSimulationResult(null);
@@ -420,6 +412,11 @@ const onSubmit = (values: FormValues) => {
     setLiveData([]);
     setDisplayData([]);
     pendingDataRef.current = [];
+    setIsLiveViewVisible(true);
+
+    // Wait a tick for the LiveSimulationView to mount before pushing data
+    await new Promise(r => setTimeout(r, 50));
+    liveViewRef.current?.clear();
     scrollToResults();
 
     const componentName = values.predefinedComponent
@@ -428,26 +425,26 @@ const onSubmit = (values: FormValues) => {
 
     if (!values.maxCurrent || values.maxCurrent <= 0) {
       toast({ variant: 'destructive', title: 'Invalid Input', description: 'Please populate component specs before running an analysis.' });
+      setIsLiveViewVisible(false);
       return;
     }
 
-    // Simple callback: push to pending buffer, throttled updates handle the rest
+    // Callback: push to pending buffer, rAF loop drains to canvas
     const updateCallback = (newDataPoint: LiveDataPoint) => {
       pendingDataRef.current.push(newDataPoint);
     };
 
-    // Start throttled chart updates (~15fps)
-    startThrottledChartUpdates(values.simulationAlgorithm);
+    // Start 60fps render loop
+    startRenderLoop();
 
-    // Run simulation in Web Worker
+    // Run simulation
     const simResult = await runSimulation(values, updateCallback);
 
-    // Stop throttled updates and flush remaining data
-    stopThrottledChartUpdates();
-
+    // Stop render loop and flush
+    stopRenderLoop();
+    setIsLiveViewVisible(false);
     setSimulationResult(simResult);
 
-    // Add to history
     const historyEntry: HistoryEntry = {
       id: new Date().toISOString(),
       componentName,
@@ -737,6 +734,14 @@ const onSubmit = (values: FormValues) => {
                     />
                 </div>
                 <div className="md:col-span-3" ref={resultsRef}>
+                    {/* 60fps Canvas live view — rendered here so we own the ref */}
+                    {isLiveViewVisible && (
+                      <LiveSimulationView
+                        ref={liveViewRef}
+                        simulationMode={form.getValues().simulationMode}
+                        maxTemperature={form.getValues().maxTemperature}
+                      />
+                    )}
                     <ResultsDisplay
                         isLoading={isPending}
                         simulationResult={simulationResult}
@@ -748,6 +753,7 @@ const onSubmit = (values: FormValues) => {
                         isDeepDiveRunning={isDeepDiveRunning}
                         deepDiveSteps={deepDiveSteps}
                         currentDeepDiveStep={currentDeepDiveStep}
+                        liveViewHandledByParent={isLiveViewVisible}
                     />
                 </div>
             </div>

@@ -20,6 +20,8 @@ interface ResultsDisplayProps {
   isDeepDiveRunning: boolean;
   deepDiveSteps: AiDeepDiveStep[];
   currentDeepDiveStep: number;
+  /** When true, the parent is rendering the live view separately */
+  liveViewHandledByParent?: boolean;
 }
 
 // NEW: Add SmoothCounter component
@@ -94,10 +96,10 @@ const ResultMetric = ({
   </div>
 );
 
-export default function ResultsDisplay({ 
-  isLoading, 
-  simulationResult, 
-  aiCalculatedResults, 
+export default function ResultsDisplay({
+  isLoading,
+  simulationResult,
+  aiCalculatedResults,
   aiOptimizationSuggestions,
   liveData,
   formValues,
@@ -105,6 +107,7 @@ export default function ResultsDisplay({
   isDeepDiveRunning,
   deepDiveSteps,
   currentDeepDiveStep,
+  liveViewHandledByParent = false,
 }: ResultsDisplayProps) {
 
   if (isDeepDiveRunning) {
@@ -118,14 +121,9 @@ export default function ResultsDisplay({
     )
   }
 
-  if (isLoading && liveData.length > 0) {
-    return (
-      <LiveSimulationView 
-        liveData={liveData} 
-        simulationMode={formValues.simulationMode}
-        maxTemperature={formValues.maxTemperature}
-      />
-    );
+  // When the parent renders the live view (canvas 60fps), skip rendering it here
+  if (isLoading && liveViewHandledByParent) {
+    return null;
   }
 
   if (isLoading) {
