@@ -15,6 +15,8 @@ import HistoryView from './history-view';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../ui/alert-dialog';
 import { FileText, Search, Bot } from 'lucide-react';
 import { Button } from '../ui/button';
+import { isTauri, runTauriSimulation, convertToLiveDataPoints } from '@/lib/tauri';
+import type { TauriSimulationParams } from '@/lib/tauri';
 
 const isMosfetType = (type: string) => {
     return type.includes('MOSFET') || type.includes('GaN');
@@ -291,51 +293,98 @@ export default function AmpereAnalyzer() {
   }, [form, toast]);
 
 
-  const runSimulation = (
+  // Compute shared simulation parameters from form values
+  const buildSimParams = (values: FormValues) => {
+    const selectedCooling = coolingMethods.find(c => c.value === values.coolingMethod) as CoolingMethod;
+    const totalRth = values.rthJC + selectedCooling.thermalResistance;
+    const rdsOnOhms = (values.rdsOn || 0) / 1000;
+    const effectiveCoolingBudget = (values.simulationMode === 'budget' && values.coolingBudget)
+      ? values.coolingBudget
+      : selectedCooling.coolingBudget;
+    return { selectedCooling, totalRth, rdsOnOhms, effectiveCoolingBudget };
+  };
+
+  // Run simulation via Rust/Tauri backend (returns all data at once)
+  const runTauriSim = async (
+    values: FormValues,
+    updateCallback: (data: LiveDataPoint) => void
+  ): Promise<SimulationResult> => {
+    const { totalRth, rdsOnOhms, effectiveCoolingBudget } = buildSimParams(values);
+
+    const params: TauriSimulationParams = {
+      maxCurrent: values.maxCurrent,
+      maxVoltage: values.maxVoltage,
+      powerDissipation: values.powerDissipation ?? null,
+      rthJc: values.rthJC,
+      riseTime: values.riseTime,
+      fallTime: values.fallTime,
+      switchingFrequency: values.switchingFrequency,
+      maxTemperature: values.maxTemperature,
+      ambientTemperature: values.ambientTemperature,
+      totalRth,
+      transistorType: values.transistorType,
+      rdsOnOhms,
+      vceSat: values.vceSat ?? null,
+      simulationMode: values.simulationMode,
+      coolingBudget: values.coolingBudget ?? null,
+      simulationAlgorithm: values.simulationAlgorithm,
+      precisionSteps: values.precisionSteps,
+      effectiveCoolingBudget,
+    };
+
+    const tauriResult = await runTauriSimulation(params);
+
+    // Feed all data points into the callback so the chart still animates
+    const livePoints = convertToLiveDataPoints(tauriResult);
+    for (const point of livePoints) {
+      updateCallback(point);
+    }
+
+    return {
+      status: tauriResult.status,
+      maxSafeCurrent: tauriResult.maxSafeCurrent,
+      failureReason: tauriResult.failureReason,
+      details: tauriResult.details,
+      finalTemperature: tauriResult.finalTemperature,
+      powerDissipation: tauriResult.powerDissipation,
+    } as SimulationResult;
+  };
+
+  // Run simulation via Web Worker (streams data points back)
+  const runWorkerSim = (
     values: FormValues,
     updateCallback: (data: LiveDataPoint) => void
   ): Promise<SimulationResult> => {
     return new Promise((resolve, reject) => {
+      const { totalRth, rdsOnOhms, effectiveCoolingBudget } = buildSimParams(values);
       const {
         maxCurrent, maxVoltage, powerDissipation, rthJC, riseTime, fallTime,
-        switchingFrequency, maxTemperature, ambientTemperature, coolingMethod,
-        transistorType, rdsOn, vceSat, simulationMode, coolingBudget,
+        switchingFrequency, maxTemperature, ambientTemperature,
+        transistorType, vceSat, simulationMode, coolingBudget,
         simulationAlgorithm, precisionSteps,
       } = values;
-  
-      const selectedCooling = coolingMethods.find(c => c.value === coolingMethod) as CoolingMethod;
-      const totalRth = rthJC + selectedCooling.thermalResistance;
-      const rdsOnOhms = (rdsOn || 0) / 1000;
-      const effectiveCoolingBudget = (simulationMode === 'budget' && coolingBudget) ? coolingBudget : selectedCooling.coolingBudget;
-  
-      // Create Web Worker
+
       const worker = new Worker('/simulation-worker.js');
-      
-      // Handle messages from worker (supports both single points and batches)
+
       worker.onmessage = (e) => {
         const { type, data, result } = e.data;
-
         if (type === 'dataPoint') {
-          // Single data point (used by binary search)
           updateCallback(data);
         } else if (type === 'dataBatch') {
-          // Batch of data points (used by iterative algorithm)
           for (const point of data) {
             updateCallback(point);
           }
         } else if (type === 'complete') {
-          // Simulation finished
           worker.terminate();
           resolve(result);
         }
       };
-      
+
       worker.onerror = (error) => {
         worker.terminate();
         reject(error);
       };
-      
-      // Send simulation parameters to worker
+
       worker.postMessage({
         maxCurrent, maxVoltage, powerDissipation, rthJC, riseTime, fallTime,
         switchingFrequency, maxTemperature, ambientTemperature, totalRth,
@@ -343,6 +392,17 @@ export default function AmpereAnalyzer() {
         simulationAlgorithm, precisionSteps, effectiveCoolingBudget
       });
     });
+  };
+
+  // Unified entry point: picks Tauri or Web Worker at runtime
+  const runSimulation = (
+    values: FormValues,
+    updateCallback: (data: LiveDataPoint) => void
+  ): Promise<SimulationResult> => {
+    if (isTauri()) {
+      return runTauriSim(values, updateCallback);
+    }
+    return runWorkerSim(values, updateCallback);
   };
   
 

@@ -2,7 +2,8 @@ import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
   /* config options here */
-  output: 'export', // Required for Tauri - generates static HTML/JS/CSS
+  // NOTE: Cannot use output: 'export' because Server Actions (AI features)
+  // require a server. Tauri uses devUrl to proxy the Next.js server instead.
   typescript: {
     ignoreBuildErrors: true,
   },
