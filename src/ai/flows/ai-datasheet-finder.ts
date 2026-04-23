@@ -1,4 +1,3 @@
-'use server';
 /**
  * @fileOverview An AI agent that finds a transistor datasheet from the web.
  *
@@ -52,10 +51,7 @@ const prompt = ai.definePrompt({
   4.  **If NOT Found**:
       - Set 'foundDatasheetName' to "Not Found".
       - Fill the 'keyParameters' fields with "N/A".
-  5.  **Output Format**: Provide the result strictly in the JSON format defined by the output schema. Do not include any other text or explanation. You MUST respond, even if nothing is found.
-  
-  Make sure to output a valid JSON according to the schema. The Zod schema descriptions are:
-  ${JSON.stringify(FindDatasheetOutputSchema.describe())}`,
+  5.  **Output Format**: Provide the result strictly in the JSON format defined by the output schema. Do not include any other text or explanation. You MUST respond, even if nothing is found.`,
 });
 
 

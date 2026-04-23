@@ -1,4 +1,3 @@
-'use server';
 /**
  * @fileOverview AI-powered PDF reader tool to extract transistor specifications from datasheets.
  *

@@ -1,4 +1,3 @@
-'use server';
 /**
  * @fileOverview An AI agent that scours the internet for transistor parameters
  * when a datasheet cannot be found, acting like a "transistor bloodhound".
@@ -52,10 +51,7 @@ const prompt = ai.definePrompt({
   2.  **Educated Guesses**: If some parameters are missing, make a well-informed, conservative estimate based on similar components. For example, if you find Rds(on) but not rise/fall time, estimate them based on a typical MOSFET with that Rds(on).
   3.  **Fill All Fields**: You MUST provide a value for every field in the output schema. Use "N/A" only if the parameter is truly not applicable (e.g., rdsOn for a BJT).
   4.  **Confidence & Sources**: Assess your confidence (High, Medium, or Low) based on the quality of your sources. Briefly describe your sources. For example: "High confidence, data from manufacturer's official product page." or "Low confidence, data estimated from similar components as only partial specs were found on a forum."
-  5.  **Output Format**: Provide the result strictly in the JSON format. Do not include any other text or explanation outside of the JSON structure.
-
-  The Zod schema descriptions are:
-  ${JSON.stringify(GetBestEffortSpecsOutputSchema.describe())}`,
+  5.  **Output Format**: Provide the result strictly in the JSON format. Do not include any other text or explanation outside of the JSON structure.`,
 });
 
 

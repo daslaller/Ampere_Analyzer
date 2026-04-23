@@ -16,6 +16,7 @@
 # next.js
 /.next/
 /out/
+/.svelte-kit/
 
 # production
 /build
@@ -39,6 +40,7 @@ next-env.d.ts
 
 .genkit/*
 .env*
+/.npm-cache/
 
 # firebase
 firebase-debug.log

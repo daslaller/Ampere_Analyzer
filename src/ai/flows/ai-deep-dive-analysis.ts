@@ -1,5 +1,3 @@
-'use server';
-
 /**
  * @fileOverview An AI agent that performs an in-depth, iterative analysis to find optimal parameters.
  *
